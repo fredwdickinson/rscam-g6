@@ -1,4 +1,7 @@
 *.csv
+*.doc 
+*.docx
+*.tsv
 __pycache__/
 .devcontainer/
 .vscode/
