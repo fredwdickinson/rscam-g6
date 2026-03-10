@@ -2,6 +2,7 @@
 *.doc 
 *.docx
 *.tsv
+*.Rhistory
 __pycache__/
 .devcontainer/
 .vscode/
