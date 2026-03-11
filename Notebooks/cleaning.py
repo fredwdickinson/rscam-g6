@@ -12,6 +12,7 @@ def clean_data(raw_df, relevant_cols, early_age = 50):
 
     df = raw_df.copy()
     clean_df = (df
+            .pipe(strip_strings)
             .pipe(groupby_age)
             .pipe(filter_columns, relevant_cols = relevant_cols)
             .pipe(remove_duplicates)
@@ -19,6 +20,12 @@ def clean_data(raw_df, relevant_cols, early_age = 50):
             )
 
     return clean_df
+
+# ==================================
+
+def strip_strings(df):
+    df.columns = df.columns.str.strip()
+    return df
 
 # ==================================
 
