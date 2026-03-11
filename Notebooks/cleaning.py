@@ -42,7 +42,7 @@ def groupby_age(df):
     age_cols = np.array([col for col in cols if pattern.search(col) and "Diagnosis" in col])
 
     # bfill takes the first nonempty entry across the age columns.
-    df.loc[:, 'Age'] = df[age_cols].bfill(axis = 1).iloc[:, 0]
+    df.loc[:, 'Age'] = pd.to_numeric(df[age_cols].bfill(axis = 1).iloc[:, 0], errors = "coerce")
     df = df.drop(columns = age_cols)
     return df
 
