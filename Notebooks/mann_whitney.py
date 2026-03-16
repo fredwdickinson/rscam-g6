@@ -13,7 +13,7 @@ def perform_MWU(sample1, sample2, alpha, verbose = True):
     else:
         return rejected
 
-def run_simulation(sample1, sample2, alpha =0.05, n_iterations = 100, sample_size = 35):
+def run_simulation(sample1, sample2, alpha =0.05, n_iterations = 100, sample_size = 35, verbose = True):
     rejections = 0
     for _ in range(n_iterations):
         rejection = perform_MWU(
@@ -24,4 +24,7 @@ def run_simulation(sample1, sample2, alpha =0.05, n_iterations = 100, sample_siz
         )
         rejections += rejection
 
-    print(f"Rejections: {rejections} in {n_iterations} tests")
+    if verbose:
+        print(f"Rejections: {rejections} in {n_iterations} tests")
+    else:
+        return rejections
