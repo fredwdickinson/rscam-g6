@@ -30,6 +30,7 @@ def cosine_sim(u, v):
         print(rf"Vector v: {v}.")
         raise ValueError("Error encountered in cosine similarity.")
     
+    
 # ==================================================================================
 
 def compare_models(baseline_sig, assumed_profile, N_muts, tol, f_comparison = cosine_sim, B = 1000):
@@ -84,7 +85,7 @@ def compare_alpha(baseline_sig, healthy_profile, sbs88_profile, alpha, N_muts,
 # ==================================================================================
 
 def optimal_alpha_tol(healthy_profile, sbs88_profile, alpha, N_muts_range, 
-                      tol_range = None, baseline_comparisons = 5, plot = False):
+                      tol_range = None, baseline_comparisons = 100, plot = False):
     """ 
     Provide the mutational profile for a healhy colon, an alpha, and the sbs88 profile.
     Finds the "optimal tolerance" for abc-alpha, where "optimal" minimises the 
@@ -157,6 +158,7 @@ def optimal_alpha_tol(healthy_profile, sbs88_profile, alpha, N_muts_range,
         ax.legend(lines, labs, loc = "center right", fontsize = 13)
         ax.set_title(rf"Optimal tolerance against the number of mutations for $\alpha = ${alpha}", fontsize = 14)
 
+        plt.savefig(f"optimal-alpha-{alpha}.png", format = "png", dpi = 200)
         plt.show()
 
     return best_tols, best_Js
