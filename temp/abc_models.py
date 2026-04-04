@@ -30,6 +30,23 @@ def cosine_sim(u, v):
         print(rf"Vector v: {v}.")
         raise ValueError("Error encountered in cosine similarity.")
     
+# ==================================================================================
+    
+def batch_cosine_sim(baseline, synthetic_matrix):
+    """ 
+    Computes the cosine similarity between a baseline signature and a batch of 
+    synthetic signatures.
+        Returns a Bx1 vector if synthetic_matrix is Bx96.
+    """
+
+    # Cosine similarity is dot(u, v) / (|u| |v|)
+    # We are using cosine distance 1 - ... 
+    dp = np.dot(synthetic_matrix, baseline) # Shape (B, 1)
+    similarity = dp / (np.linalg.norm(synthetic_matrix, axis = 1) * np.linalg.norm(baseline))
+
+    # Clip in case of machine precision.
+    return 1.0 - np.clip(similarity, -1.0, 1.0)
+    
     
 # ==================================================================================
 
@@ -58,7 +75,7 @@ def compare_models(baseline_sig, assumed_profile, N_muts, tol, f_comparison = co
 # ==================================================================================
 
 def compare_alpha(baseline_sig, healthy_profile, sbs88_profile, alpha, N_muts,
-                   tol = 0.25, f_comparison = cosine_sim, B = 1000):
+                   tol, B = 1000, distances_only = False):
     """ 
     Provide an injection level alpha, a baseline signature, and test the hypothesis
         "this signature has been derived with alpha = alpha 
@@ -67,22 +84,25 @@ def compare_alpha(baseline_sig, healthy_profile, sbs88_profile, alpha, N_muts,
     Specify the number of mutations present in the synthetic signatures. 
     NOTE These should match the baseline signature, if it's synthetically generated. 
     Specify the tolerance at which we accept an alpha. Low tolerance: harsher acceptance rate.
+        Newer version with vectorisation.
     """
 
-    accepts = np.zeros(B)
+    # Generate infected profile for that alpha.
     profile = synthetic_data.composite_profile(healthy_profile, sbs88_profile, alpha)
 
-    for j in range(B):
-        synthetic_sig = synthetic_data.generate_signature(profile, N_muts)
-        difference_score = f_comparison(baseline_sig, synthetic_sig)
+     # Compare all at once.
+    synthetic_sig_mat = synthetic_data.generate_signature(profile, N_muts, B = B)
+    difference_scores = batch_cosine_sim(baseline_sig, synthetic_sig_mat)
 
-        if (np.abs(difference_score) < tol):
-            accepts[j] = 1
-
-    percentage_accept = np.sum(accepts) / B 
+    if (distances_only):
+        # No tol used, returns a 1000x1 vector (B = 1000).
+        return difference_scores
+    
+    percentage_accept = np.mean(difference_scores < tol)
     return percentage_accept
 
 # ==================================================================================
+
 
 def optimal_alpha_tol(healthy_profile, sbs88_profile, alpha, N_muts_range, 
                       tol_range = None, baseline_comparisons = 100, plot = False):
@@ -91,9 +111,7 @@ def optimal_alpha_tol(healthy_profile, sbs88_profile, alpha, N_muts_range,
     Finds the "optimal tolerance" for abc-alpha, where "optimal" minimises the 
         TPR - FPR : how often does it recover signatures derived from alpha, against those from a healthy colon?
     Averages across (5 default) baseline comparison, each with (1000 default) batches.
-    Assumes alpha > 0.
     """
-
 
     # J refers to TPR - FPR.
     best_tols = np.zeros_like(N_muts_range, dtype = np.float64)
@@ -107,40 +125,70 @@ def optimal_alpha_tol(healthy_profile, sbs88_profile, alpha, N_muts_range,
     # For each number of mutations, try each tolerance value.
     # Average it across the number of baseline comparisons.
     for j, N_muts in enumerate(N_muts_range):
-        tol_best = 0
-        J_best = 0 
+        # Generate all num_comparisons lot of the healthy/alpha signatures
+        baseline_healthy_sigs = np.array([synthetic_data.generate_signature(healthy_profile, N_muts) for _ in range(baseline_comparisons)])
+        baseline_infected_sigs = np.array([synthetic_data.generate_signature(infected_profile, N_muts) for _ in range(baseline_comparisons)])
         
+        # compare_alpha() will give the cosine difference from two mutational signatures.
+        # Want the distances for each value of alpha, for each baseline signature, across all B=1000 batches.
+        a_range = np.linspace(0, 1, 100) # Uses a_bins = 100.
+        distances_tp = np.zeros((len(a_range), baseline_comparisons, 1000))
+        distances_fp = np.zeros((len(a_range), baseline_comparisons, 1000))
+
+        # Create distance matrix.
+        for i, alpha_abc in enumerate(a_range):
+            infected_profile = synthetic_data.composite_profile(healthy_profile, sbs88_profile, alpha_abc)
+            synthetic_comparisons_mat = synthetic_data.generate_signature(infected_profile, N_muts, B = 1000)
+
+            for k in range(baseline_comparisons):
+                # Compare infected signature across a range of alphas.
+                distances_tp[i, k, :] = batch_cosine_sim(baseline_infected_sigs[k], synthetic_comparisons_mat)
+                distances_fp[i, k, :] = batch_cosine_sim(baseline_healthy_sigs[k], synthetic_comparisons_mat)
+                
+        # Shape of both: 50 x baseline_comparisons x B
+        # Normally 50 x 100 x 1000. Each row corresponds to an alpha.
+        # Now compare across a range of tolerances: not recompute every time.
+        best_tol = 0; best_J = 0;
         for tol in tol_range:
-            # Store scores across all baseline comparisons, average later.    
-            all_J_tol = 0
+            # Calculate posteriors for all 100 baselines across all 50 alphas.
+            # Shape 50x100, mean is over [alpha, baseline, :]
+            tp_posteriors = np.mean(distances_tp < tol, axis = 2)
+            fp_posteriors = np.mean(distances_fp < tol, axis = 2) 
+            
+            # Normalise, 1e-12 for avoiding div-by-zero (won't warn here).
+            # NOTE Later look to reintroducing the warnings.
+            tp_posteriors_norm = tp_posteriors / (tp_posteriors.sum(axis = 0) + 1e-12)
+            fp_posteriors_norm = fp_posteriors / (fp_posteriors.sum(axis = 0) + 1e-12)
 
-            for _ in range(baseline_comparisons):
-                baseline_healthy_sig = synthetic_data.generate_signature(healthy_profile, N_muts)
-                baseline_alpha_sig = synthetic_data.generate_signature(infected_profile, N_muts)
+            tp_count = 0; fp_count = 0;
+            # Classify every the alphas from every baseline signature comparison using hdi().
+            for k in range(baseline_comparisons):     
+                # Check enough have been accepted.
+                # NOTE important! Normalisation blows up the ratios.
+                total_tp_accepted = np.sum(tp_posteriors[:, k])*1000
+                total_fp_accepted = np.sum(fp_posteriors[:, k])*1000
 
+                if (total_tp_accepted > 10):
+                    a0_tp, a1_tp, mode_tp, _ = hdi(tp_posteriors_norm[:, k], a_range)
+                    tp_count += abc_alpha_classifier(a0_tp, a1_tp, mode_tp)[0]
                 
-                # Run the alpha model with synthetic signatures and infected signatures.
-                # 1. Compares alpha-generated to alpha-generated, should return true.
-                tp = abc_alpha_classifier(baseline_alpha_sig, healthy_profile, sbs88_profile, 
-                                          N_muts, tol = tol)[0]
-                
-                # 2. Compare healthy to alpha-generated, should return false.
-                fp = abc_alpha_classifier(baseline_healthy_sig, healthy_profile, sbs88_profile, 
-                                          N_muts, tol = tol)[0]
-                
-                # Best is T/F, giving 1.
-                # F/F Gives 0, T/T gives 0, F/T gives -1.
-                all_J_tol += int(tp - fp)
+                if (total_fp_accepted > 10):
+                    a0_fp, a1_fp, mode_fp, _ = hdi(fp_posteriors_norm[:, k], a_range)
+                    fp_count += abc_alpha_classifier(a0_fp, a1_fp, mode_fp)[0]
 
-            # After looping over all baseline comparisons, average.
-            J_tol = all_J_tol / baseline_comparisons 
-            if (J_tol > J_best):
-                J_best = J_tol 
-                tol_best = tol
-        
-        # Store the best tolerance value for that number of mutations.
-        best_tols[j] = tol_best 
-        best_Js[j] = J_best 
+            # Best J = TPR - FPR, averaged across the number of baseline_comparisons.
+            tpr = tp_count / baseline_comparisons
+            fpr = fp_count / baseline_comparisons
+            # print(f"J score is {round(tpr - fpr, 4)} for tol {round(tol, 3)} and muts {N_muts}.")
+            J_tol = tpr - fpr
+
+            if (J_tol > best_J):
+                best_tol = tol 
+                best_J = J_tol 
+            
+        # Outside tolerance loop.
+        best_tols[j] = best_tol 
+        best_Js[j] = best_J
 
     if (plot):
         fig, ax = plt.subplots(figsize = (8, 4), tight_layout = True)
@@ -151,6 +199,7 @@ def optimal_alpha_tol(healthy_profile, sbs88_profile, alpha, N_muts_range,
         ax2 = ax.twinx()
         line2 = ax2.plot(N_muts_range, best_Js, marker = "^", color = "blue", label = "TPR - FPR")
         ax2.set_ylabel(r"$J$-Statistic (TPR - FPR)", fontsize = 12)
+        ax2.set_ylim(-0.05, 1.05)
 
         # For combining the legend.
         lines = line1 + line2
@@ -166,29 +215,27 @@ def optimal_alpha_tol(healthy_profile, sbs88_profile, alpha, N_muts_range,
 # ==================================================================================
 
 def abc_alpha_inference(baseline_sig, healthy_profile, sbs88_profile, N_muts, hdi_mass = 0.9,
-                        alpha_range = None, a_bins = 50, plot = False, tol = 0.25):
+                        alpha_range = None, a_bins = 100, plot = False, tol = 0.05):
     """ 
     Provide a baseline signature. This gives a posterior distribution for alpha, assuming
     the signature is derived from
         alphaSBS88 + (1-alpha)healthyColon.
     The number of mutations N_muts should match the total present in the given signature, but 
     it is also helpful to range this (e.g. for power analysis).
+        Returns the distribution, the alpha range, a0, a1, a_mode, and the hdi_mass.
     """
 
     if (not alpha_range):
         alpha_range = np.linspace(0, 1, a_bins)
 
-    alpha_acceptances = np.zeros_like(alpha_range)
-    for j, alpha in enumerate(alpha_range):
-        # NOTE Here find the best tolerance for 
-        alpha_acceptances[j] = compare_alpha(baseline_sig, healthy_profile, sbs88_profile,
-                                             alpha, N_muts, tol = tol)
+    alpha_acceptances = np.array([compare_alpha(baseline_sig, healthy_profile, sbs88_profile,
+                                             alpha, N_muts, tol = tol) for alpha in alpha_range])
 
     # Normalise the acceptances. 
-    if not (np.sum(alpha_acceptances) > 1e-6):
-        warnings.warn(rf"No value of $\alpha$ was accepted. Try adjusting the tolerance. Here tol = {tol} with {N_muts} mutations.")
-        # Zeroes are a0, a1, mode.
-        return alpha_acceptances, alpha_range, 0, 0, 0, hdi_mass
+    total_accepted_samples = np.sum(alpha_acceptances)*1000
+    if total_accepted_samples < 10:
+        # Not enough data to form a reliable posterior. 
+        return alpha_acceptances, alpha_range, 0.0, 0.0, 0.0, hdi_mass, False, 0.0
     
     alpha_acceptances = alpha_acceptances / np.sum(alpha_acceptances)
     if (np.abs(1 - np.sum(alpha_acceptances)) > 1e-6):
@@ -197,6 +244,7 @@ def abc_alpha_inference(baseline_sig, healthy_profile, sbs88_profile, N_muts, hd
     # Find the interval of alphas corresponding to 90% (default) mass.
     # Uses the hdi() function below.
     alpha0, alpha1, alpha_mode, total_mass = hdi(alpha_acceptances, alpha_range, mass = hdi_mass)
+    sbs88_detected, estimated_alpha = abc_alpha_classifier(alpha0, alpha1, alpha_mode)
     
     if (plot):
         fig, ax = plt.subplots(figsize = (8, 4), tight_layout = True)
@@ -215,7 +263,7 @@ def abc_alpha_inference(baseline_sig, healthy_profile, sbs88_profile, N_muts, hd
         plt.show()
 
     # NOTE Currently don't use the total mass, just the density mass specified (90%).
-    return alpha_acceptances, alpha_range, alpha0, alpha1, alpha_mode, hdi_mass
+    return alpha_acceptances, alpha_range, alpha0, alpha1, alpha_mode, hdi_mass, sbs88_detected, estimated_alpha
 
 # ==================================================================================
 
@@ -244,8 +292,7 @@ def hdi(acceptances, alpha_range, mass = 0.9):
 
 # ====================================================================================
 
-def abc_alpha_classifier(baseline_sig, healthy_profile, sbs88_profile, N_muts, 
-                         hdi_mass = 0.9, tol = 0.25, plot = False):
+def abc_alpha_classifier(a0, a1, a_mode):
     """ 
     Provide a baseline signature. This classifies the signature as having risen from 
         an infected colon alphaSBS88 + (1-alpha)healthyColon.
@@ -254,10 +301,10 @@ def abc_alpha_classifier(baseline_sig, healthy_profile, sbs88_profile, N_muts,
         sbs88 detected? :: boolean
         approximate injection level :: float
     """
-
-    acceptances, alpha_range, a0, a1, a_mode, hdi_mass = abc_alpha_inference(baseline_sig, healthy_profile,
-                                                            sbs88_profile, N_muts, hdi_mass = hdi_mass, tol = tol, plot = plot)
-
+    # First check to see if alpha0 = alpha1, then deny.
+    if (np.abs(a0 - a1) < 0.01):
+        return False, 0.0
+    
     # Case 1: alpha0 > 0.025, then imply SBS88 presence.
     if (a0 > 0.025):
         return True, a_mode
@@ -271,6 +318,37 @@ def abc_alpha_classifier(baseline_sig, healthy_profile, sbs88_profile, N_muts,
             return True, a_mode
         else:
             return False, 0.0
+        
+# ====================================================================================
+
+def detect_sbs88(baseline_sig, healthy_profile, sbs88_profile):
+    """
+    Give a baseline signature.
+    Detect the presence of SBS88 assuming it has [3, 5, 10, 100, 200, 500] mutations.
+    """
+
+    N_muts_range = np.array([3, 5, 10, 100, 200, 500])
+    
+    # NOTE Change this from being hard coded later.
+    best_tol_list = [0.15, 0.15, 0.175, 0.1, 0.075, 0.075]
+
+    if (len(best_tol_list) != len(N_muts_range)):
+        raise ValueError("Mismatch in mutation range/tolerance range shapes.")
+
+    detected = np.zeros_like(N_muts_range, dtype = bool)
+    estimated_alphas = np.zeros_like(N_muts_range, dtype = float)
+
+    for j, best_tol in enumerate(best_tol_list):
+        N_muts = N_muts_range[j]
+        all_results = abc_alpha_inference(baseline_sig, healthy_profile, sbs88_profile,
+                                                        N_muts, tol = best_tol)
+        
+        sbs88_detected, alpha_est = all_results[-2:]
+        detected[j] = sbs88_detected
+        estimated_alphas[j] = alpha_est 
+    
+    return detected, estimated_alphas, N_muts_range
+
 
 # ====================================================================================
 # ====================================================================================
@@ -397,3 +475,28 @@ def old_optimal_alpha_tol(healthy_profile, sbs88_profile, alpha, N_muts_range,
         plt.show()
 
     return best_tols, best_Js
+
+def old_compare_alpha(baseline_sig, healthy_profile, sbs88_profile, alpha, N_muts,
+                   tol = 0.25, f_comparison = cosine_sim, B = 1000):
+    """ 
+    Provide an injection level alpha, a baseline signature, and test the hypothesis
+        "this signature has been derived with alpha = alpha 
+        under the mutational profile alphaSBS88 + (1-alpha)healthyColon." 
+
+    Specify the number of mutations present in the synthetic signatures. 
+    NOTE These should match the baseline signature, if it's synthetically generated. 
+    Specify the tolerance at which we accept an alpha. Low tolerance: harsher acceptance rate.
+    """
+
+    accepts = np.zeros(B)
+    profile = synthetic_data.composite_profile(healthy_profile, sbs88_profile, alpha)
+
+    for j in range(B):
+        synthetic_sig = synthetic_data.generate_signature(profile, N_muts)
+        difference_score = f_comparison(baseline_sig, synthetic_sig)
+
+        if (np.abs(difference_score) < tol):
+            accepts[j] = 1
+
+    percentage_accept = np.sum(accepts) / B 
+    return percentage_accept

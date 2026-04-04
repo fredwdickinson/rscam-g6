@@ -8,15 +8,20 @@ def normalise(v):
 
 # ==================================================================================
 
-def generate_signature(profile, N_muts):
+def generate_signature(profile, N_muts, B = 1):
     """ 
     Generates a mutational signature given a normalised probability distribution
     (i.e. the profile) and the number of mutations presents.
+        Normalises the result.
     """
 
-    unnormalised = np.random.multinomial(N_muts, profile)
-    return unnormalised / np.sum(unnormalised)
-    # return np.random.multinomial(N_muts, profile)
+    if (B == 1):
+        # Keep old logic for notebook code.
+        unnormalised = np.random.multinomial(N_muts, profile)
+        return unnormalised / np.sum(unnormalised)
+    else:
+        unnormalised = np.random.multinomial(N_muts, profile, size = B)
+        return unnormalised / np.sum(unnormalised)
 
 # ==================================================================================
 
