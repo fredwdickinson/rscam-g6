@@ -200,7 +200,7 @@ def test_classifier(healthy_profile, sbs88_profile, alpha_test, N_muts_test,
 
 # ====================================================================================
 
-def plot_classifier_results(summary_df, true_alpha, true_N_mut):
+def plot_classifier_results(summary_df, true_alpha = 0, true_N_mut = 0, title = None):
     """ 
     Plot the results of the classifier.
     """
@@ -221,13 +221,20 @@ def plot_classifier_results(summary_df, true_alpha, true_N_mut):
 
     # Connect them with a faint line
     ax.plot(x, y, color = "blue", alpha = 0.5, label = "Classifier Estimates")
-    ax.axhline(y = true_alpha, linestyle = "dashed", color = "black", label = r"True $\alpha$")
-    ax.axvline(x = true_N_mut, linestyle = "dashed", color = "black", label = r"True NM")
+    if (true_alpha > 0):
+        ax.axhline(y = true_alpha, linestyle = "dashed", color = "black", label = r"True $\alpha$")
+    
+    if (true_N_mut > 0):
+        ax.axvline(x = true_N_mut, linestyle = "dashed", color = "black", label = r"True NM")
+
     ax.set_xlabel("Number of Mutations", fontsize = 12)
     ax.set_ylabel(r"Estimated Injection Level $\alpha$", fontsize = 12)
-    ax.set_title(r"Results of the ABC classifier against a synthetic mutational signature.", fontsize = 14)
-
     ax.set_ylim(0.045, max(np.max(y) + 0.125, true_alpha + 0.025))
+
+    if not title:
+        title = r"Results of the ABC classifier against a synthetic mutational signature."
+
+    ax.set_title(title, fontsize = 14)
     ax.grid(True, alpha = 0.5)
     
     ax.legend(loc = "upper right", fontsize = 13)

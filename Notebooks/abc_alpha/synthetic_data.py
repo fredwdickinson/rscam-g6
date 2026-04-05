@@ -71,6 +71,8 @@ def plot_signature(contexts, mutations, profile, N_muts = None, alpha = None):
                 hue = "Mutation", palette = mutation_palette, ax = ax)
     
     ax.legend(loc = "best", fontsize = 13)
+    ax.set_xlabel("Context", fontsize = 12)
+    ax.set_ylabel("Density", fontsize = 12)
     ax.set_xticks([])
 
     if (N_muts):
