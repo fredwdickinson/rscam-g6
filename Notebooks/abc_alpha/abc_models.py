@@ -42,7 +42,7 @@ def compare_alpha(baseline_sig, healthy_profile, sbs88_profile, alpha, N_muts,
 
 
 def abc_alpha_inference(baseline_sig, healthy_profile, sbs88_profile, N_muts, hdi_mass = 0.9,
-                         a_bins = 100, tol = 0.05, B = 1000, plot = False):
+                         a_bins = 100, tol = 0.05, B = 1000, plot = False, ax = None, show = True, title = None):
     """ 
     Provide a baseline signature. This gives a posterior distribution for alpha, assuming
     the signature is derived from
@@ -61,30 +61,44 @@ def abc_alpha_inference(baseline_sig, healthy_profile, sbs88_profile, N_muts, hd
     # Normalise the acceptances. 
     total_accepted_samples = np.sum(alpha_acceptances)*B
     if total_accepted_samples < int(B/200): # Default to 5 if B = 1000.
-        # Not enough data to form a reliable posterior. 
-        return alpha_acceptances, alpha_range, 0.0, 0.0, 0.0, hdi_mass
-    
-    # Normalised acceptance rate.
-    alpha_acceptances = alpha_acceptances / np.sum(alpha_acceptances)
-    
-    # Find the interval of alphas corresponding to 90% (default) mass. Uses hdi().
-    alpha0, alpha1, alpha_mode, total_mass = helpers.hdi(alpha_acceptances, alpha_range, mass = hdi_mass)
+        # Get uniform dist and thus alpha_mode = 0, interval [0, 1]
+        hdi_mass = 1
+        alpha0, alpha1, alpha_mode, total_mass = helpers.hdi(np.zeros_like(alpha_range), alpha_range, mass = hdi_mass)
+    else:
+        # Normalised acceptance rate.
+        alpha_acceptances = alpha_acceptances / np.sum(alpha_acceptances)
+        
+        # Find the interval of alphas corresponding to 90% (default) mass. Uses hdi().
+        alpha0, alpha1, alpha_mode, total_mass = helpers.hdi(alpha_acceptances, alpha_range, mass = hdi_mass)
     
     if (plot):
-        fig, ax = plt.subplots(figsize = (8, 4), tight_layout = True)
+        if (not ax):
+            fig, ax = plt.subplots(figsize = (8, 4), tight_layout = True)
+        
         ax.plot(alpha_range, alpha_acceptances, marker = 'x', markersize = 4, color = 'blue',
                  alpha = 0.75, label = "Posterior")
         
-        ax.fill_between(alpha_range, alpha_acceptances, 
-                        where = (alpha_range >= alpha0) & (alpha_range <= alpha1), 
-                        color = 'lightblue', alpha=0.85, label = f"{hdi_mass*100:.0f}% HDI")
+        ax.plot(alpha_mode, alpha_acceptances[np.where(alpha_range == alpha_mode)], marker = 'o', 
+                markersize = 5, color = 'black', alpha = 0.85, label = rf"Est. $\alpha = ${round(alpha_mode, 2)}")
         
-        ax.set_xlabel(r"Injection Level $\alpha$", fontsize = 12)
-        ax.set_ylabel("Normalised Acceptance Probability", fontsize = 12)
-        ax.set_title(r"ABC Posterior Distribution for the Injection Level $\alpha$", fontsize = 14)
-        ax.legend(loc = "center right", fontsize = 13)
+        if (hdi_mass != 1):
+            ax.fill_between(alpha_range, alpha_acceptances, 
+                            where = (alpha_range >= alpha0) & (alpha_range <= alpha1), 
+                            color = 'lightblue', alpha=0.85, label = f"{hdi_mass*100:.0f}% HDI")
+        
+        ax.set_xlabel(r"Injection Level $\alpha$", fontsize = 14)
+        ax.set_ylabel("Density", fontsize = 14)
+        
+        if (not title):
+            title = rf"ABC Posterior Distribution for the Injection Level $\alpha$, tol = {round(tol, 4)}"
+        ax.set_title(title, fontsize = 16)
 
-        plt.show()
+        # Adjustment for the uniform
+        legend_loc = "upper center" if hdi_mass == 1 else "center right"
+        ax.legend(loc = legend_loc, fontsize = 15)
+
+        if (show):
+            plt.show()
 
     # NOTE Currently don't use the total mass, just the density mass specified (90%).
     return alpha_acceptances, alpha_range, alpha0, alpha1, alpha_mode, hdi_mass
@@ -161,7 +175,7 @@ def detect_sbs88(baseline_sig, healthy_profile, sbs88_profile,
 # ====================================================================================
 
 def test_classifier(healthy_profile, sbs88_profile, alpha_test, N_muts_test,
-                     trials = 5, plot = False):
+                     trials = 5, plot = False, save = False):
     """ 
     Generate a synthetic signature according to alpha_test and N_muts_test.
     See if the classifier recovers alpha/sbs88 at all.
@@ -194,13 +208,13 @@ def test_classifier(healthy_profile, sbs88_profile, alpha_test, N_muts_test,
     })
 
     if (plot):
-        plot_classifier_results(summary, alpha_test, N_muts_test)
+        plot_classifier_results(summary, alpha_test, N_muts_test, save = save)
 
     return summary
 
 # ====================================================================================
 
-def plot_classifier_results(summary_df, true_alpha = 0, true_N_mut = 0, title = None):
+def plot_classifier_results(summary_df, true_alpha = 0, true_N_mut = 0, title = None, save = False):
     """ 
     Plot the results of the classifier.
     """
@@ -214,12 +228,11 @@ def plot_classifier_results(summary_df, true_alpha = 0, true_N_mut = 0, title = 
 
     fig, ax = plt.subplots(figsize = (8, 4), tight_layout = True)
 
-    for j in range(len(summary_df)):
+    for j in range(len(x)):
         conf = summary_df["detected"].iloc[j]
         ax.plot(x.iloc[j], y.iloc[j], marker = "o", color = "blue", 
-                markersize = max(4, conf*8), alpha = max(0.15, conf)) # Ensure it's at least 0.2 visible
+                markersize = max(4, conf*8), alpha = max(0.15, conf))
 
-    # Connect them with a faint line
     ax.plot(x, y, color = "blue", alpha = 0.5, label = "Classifier Estimates")
     if (true_alpha > 0):
         ax.axhline(y = true_alpha, linestyle = "dashed", color = "black", label = r"True $\alpha$")
@@ -236,6 +249,10 @@ def plot_classifier_results(summary_df, true_alpha = 0, true_N_mut = 0, title = 
 
     ax.set_title(title, fontsize = 14)
     ax.grid(True, alpha = 0.5)
-    
     ax.legend(loc = "upper right", fontsize = 13)
+
+    if (save):
+        randint = np.random.randint(0, 999)
+        plt.savefig(f"classifier_results{randint}.png", format = "png", dpi = 200)
+
     plt.show()

@@ -7,7 +7,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 def optimal_alpha_tol(healthy_profile, sbs88_profile, alpha, N_muts_range, 
-                      tol_range = np.array([]), baseline_comparisons = 100, plot = False):
+                      tol_range = np.array([]), baseline_comparisons = 100, plot = False, 
+                      ax = None, save = True, show = True):
     """ 
     Provide the mutational profile for a healhy colon, an alpha, and the sbs88 profile.
     Finds the "optimal tolerance" for abc-alpha, where "optimal" minimises the 
@@ -96,24 +97,28 @@ def optimal_alpha_tol(healthy_profile, sbs88_profile, alpha, N_muts_range,
         best_Js[j] = best_J
 
     if (plot):
-        fig, ax = plt.subplots(figsize = (8, 4), tight_layout = True)
+        if (not ax):
+            fig, ax = plt.subplots(figsize = (8, 4), tight_layout = True)
+
         line1 = ax.plot(N_muts_range, best_tols, marker = "x", color = "red", label = "Tolerance")
-        ax.set_xlabel("Number of Mutations", fontsize = 12)
-        ax.set_ylabel("Tolerance", fontsize = 12)
+        ax.set_xlabel("Number of Mutations", fontsize = 14)
+        ax.set_ylabel("Tolerance", fontsize = 14)
 
         ax2 = ax.twinx()
         line2 = ax2.plot(N_muts_range, best_Js, marker = "^", color = "blue", label = "TPR - FPR")
-        ax2.set_ylabel(r"$J$-Statistic (TPR - FPR)", fontsize = 12)
+        ax2.set_ylabel(r"$J$-Statistic (TPR - FPR)", fontsize = 14)
         ax2.set_ylim(-0.05, 1.05)
 
         # For combining the legend.
         lines = line1 + line2
         labs = [l.get_label() for l in lines]
-        ax.legend(lines, labs, loc = "lower right", bbox_to_anchor = (1, 0.175), fontsize = 13)
-        ax.set_title(rf"Optimal tolerance against the number of mutations for $\alpha = ${alpha}", fontsize = 14)
+        ax.legend(lines, labs, loc = "lower right", bbox_to_anchor = (1, 0.175), fontsize = 15)
+        ax.set_title(rf"Optimal tolerance values, $\alpha = ${alpha}.", fontsize = 16)
 
-        plt.savefig(f"optimal-alpha-{alpha}.png", format = "png", dpi = 200)
-        plt.show()
+        if (save):
+            plt.savefig(f"optimal-alpha-{alpha}.png", format = "png", dpi = 200)
+        if (show):
+            plt.show()
 
     return best_tols, best_Js
 

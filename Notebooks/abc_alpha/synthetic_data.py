@@ -54,13 +54,14 @@ def create_mutational_profiles(healthy_profile, sbs88_profile, alpha_range = [0,
 
 # ==================================================================================
 
-def plot_signature(contexts, mutations, profile, N_muts = None, alpha = None):
+def plot_signature(contexts, mutations, profile, N_muts = None, alpha = None, title = None, 
+                   axis_ticks = False, save = False, ax = None):
     """ 
     Plot a mutational signature. Default sets the axis off.
     """
-
-    fig, ax = plt.subplots(figsize = (8, 4), tight_layout = True)
-
+    if (not ax):
+        fig, ax = plt.subplots(figsize = (10, 4), tight_layout = True)
+    
     # Construct df and palette for seaborn plotting.
     plot_data = pd.DataFrame({"Context": contexts, "Mutation": mutations, "Density": profile})
     mutation_palette = {"T>A": "blue", "T>C": "red", "T>G": "green",
@@ -71,15 +72,22 @@ def plot_signature(contexts, mutations, profile, N_muts = None, alpha = None):
                 hue = "Mutation", palette = mutation_palette, ax = ax)
     
     ax.legend(loc = "best", fontsize = 13)
-    ax.set_xlabel("Context", fontsize = 12)
-    ax.set_ylabel("Density", fontsize = 12)
+    ax.set_xlabel("Trinucleotide Context", fontsize = 12)
+    ax.set_ylabel("Probability Density", fontsize = 12)
     ax.set_xticks([])
 
     if (N_muts):
         title = rf"Mutational signature with {N_muts} mutations and $\alpha =${alpha}."
         ax.set_title(title, fontsize = 14)
+    elif (title and not N_muts):
+        ax.set_title(title, fontsize = 14)
+    elif (axis_ticks):
+        ax.set_xticks(contexts)
+        ax.tick_params(axis = "x", labelrotation = 90)
     
-
+    if (save):
+        randint = np.random.randint(0, 999)
+        plt.savefig(f"signature{randint}.png", format = "png", dpi = 200)
     plt.show()
     
 
