@@ -88,8 +88,9 @@ def plot_signature(contexts, mutations, profile, N_muts = None, alpha = None, ti
     if (save):
         randint = np.random.randint(0, 999)
         plt.savefig(f"signature{randint}.png", format = "png", dpi = 200)
+
     plt.show()
-    
+    plt.close(fig)
 
 
 

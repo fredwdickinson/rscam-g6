@@ -119,6 +119,7 @@ def optimal_alpha_tol(healthy_profile, sbs88_profile, alpha, N_muts_range,
             plt.savefig(f"optimal-alpha-{alpha}.png", format = "png", dpi = 200)
         if (show):
             plt.show()
+            plt.close(fig)
 
     return best_tols, best_Js
 

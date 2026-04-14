@@ -91,3 +91,16 @@ def retrieve_best_tol(est_N_muts_range, csv_path = "../abc_alpha/optimal_abc_tol
 
     return tol_mat
 
+# =======================================
+
+def reorder_contexts(df, context_col, ordered_contexts, rename = None):
+    """ 
+    Reorders a dataframe to have the contexts appear in the same order we have.
+    """
+
+    if not rename:
+        rename = context_col
+
+    df_sorted = df.set_index(context_col).reindex(ordered_contexts).reset_index()
+    df_sorted = df_sorted.rename(columns = {ordered_contexts.name: rename})
+    return df_sorted

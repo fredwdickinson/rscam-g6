@@ -99,6 +99,7 @@ def abc_alpha_inference(baseline_sig, healthy_profile, sbs88_profile, N_muts, hd
 
         if (show):
             plt.show()
+            plt.close(fig)
 
     # NOTE Currently don't use the total mass, just the density mass specified (90%).
     return alpha_acceptances, alpha_range, alpha0, alpha1, alpha_mode, hdi_mass
